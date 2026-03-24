@@ -347,7 +347,7 @@ class MetricsHistogramsWidget(BaseWidget):
         sorting_analyzer = None,
         thresholds: dict | None = None,
         metrics_to_plot: list | None = None,
-        external_metrics: pd.DataFrame = None,
+        external_metrics = None,
         backend=None,
         **backend_kwargs,
     ):
