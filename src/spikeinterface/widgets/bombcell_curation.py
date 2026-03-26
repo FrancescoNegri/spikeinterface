@@ -41,18 +41,22 @@ class BombcellUpsetPlotWidget(BaseWidget):
 
     def __init__(
         self,
-        sorting_analyzer,
+        sorting_analyzer = None,
         unit_labels: np.ndarray,
         thresholds: dict | None = None,
         unit_labels_to_plot: list | None = None,
         min_subset_size: int = 1,
+        external_metrics = None,
         backend=None,
         **backend_kwargs,
     ):
         from spikeinterface.curation import bombcell_get_default_thresholds
 
-        sorting_analyzer = self.ensure_sorting_analyzer(sorting_analyzer)
-        combined_metrics = sorting_analyzer.get_metrics_extension_data()
+        if sorting_analyzer is not None:
+            sorting_analyzer = self.ensure_sorting_analyzer(sorting_analyzer)
+            combined_metrics = sorting_analyzer.get_metrics_extension_data()
+        else:
+            combined_metrics = external_metrics
         if combined_metrics.empty:
             raise ValueError(
                 "SortingAnalyzer has no metrics extensions computed. "
