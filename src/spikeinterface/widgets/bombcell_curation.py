@@ -41,8 +41,8 @@ class BombcellUpsetPlotWidget(BaseWidget):
 
     def __init__(
         self,
-        sorting_analyzer = None,
         unit_labels: np.ndarray,
+        sorting_analyzer = None,
         thresholds: dict | None = None,
         unit_labels_to_plot: list | None = None,
         min_subset_size: int = 1,
