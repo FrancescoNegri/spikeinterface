@@ -362,3 +362,131 @@ def save_bombcell_results(
 
         narrow_df = pd.DataFrame(rows)
         narrow_df.to_csv(folder / "labeling_results_narrow.csv", index=False)
+
+
+def bombcell_get_failing_metrics(
+    sorting_analyzer = None,
+    unit_labels: np.ndarray | "pd.Series" | "pd.DataFrame" = None,
+    thresholds: dict | str | Path | None = None,
+    external_metrics: "pd.DataFrame | list[pd.DataFrame]" | None = None
+) -> dict:
+    import pandas as pd
+
+    if sorting_analyzer is not None:
+        combined_metrics = sorting_analyzer.get_metrics_extension_data()
+        if combined_metrics.empty:
+            raise ValueError(
+                "SortingAnalyzer has no metrics extensions computed. "
+                "Compute quality_metrics and/or template_metrics first."
+            )
+    else:
+        if external_metrics is None:
+            raise ValueError("Either sorting_analyzer or external_metrics must be provided")
+        if isinstance(external_metrics, list):
+            assert all(
+                isinstance(df, pd.DataFrame) for df in external_metrics
+            ), "All items in external_metrics must be DataFrames"
+            combined_metrics = pd.concat(external_metrics, axis=1)
+        else:
+            combined_metrics = external_metrics
+
+    if thresholds is None:
+        thresholds_dict = bombcell_get_default_thresholds()
+    elif isinstance(thresholds, (str, Path)):
+        with open(thresholds, "r") as f:
+            thresholds_dict = json.load(f)
+    elif isinstance(thresholds, dict):
+        thresholds_dict = thresholds
+    else:
+        raise ValueError("thresholds must be a dict, a JSON file path, or None")
+
+    failure_table = _bombcell_build_failure_table(combined_metrics, thresholds_dict)
+    
+    if unit_labels is None:
+        unit_labels = bombcell_label_units(external_metrics=combined_metrics, thresholds=thresholds_dict)["bombcell_label"]
+
+    failing_metrics = {}
+    for unit_label in np.unique(unit_labels):
+        mask = unit_labels == unit_label
+        n_units = np.sum(mask)
+        if n_units == 0:
+            continue
+        
+        relevant_metrics = _get_metrics_for_unit_label(unit_label, thresholds_dict)
+        if relevant_metrics is not None:
+            available_metrics = [m for m in relevant_metrics if m in failure_table.columns]
+            if len(available_metrics) == 0:
+                continue
+            unit_failure_table = failure_table[available_metrics]
+        else:
+            unit_failure_table = failure_table
+
+        unit_failures = unit_failure_table.loc[mask]
+        for idx in unit_failures.index:
+            failed = unit_failures.columns[unit_failures.loc[idx]].tolist()
+            if failed:
+                failing_metrics[idx] = dict(zip(failed, combined_metrics.loc[idx][failed].values))
+
+        if not failing_metrics:
+            continue
+
+    failing_metrics = dict(sorted(failing_metrics.items()))
+
+    return failing_metrics
+
+
+def _bombcell_build_failure_table(
+    metrics: "pd.DataFrame",
+    thresholds: dict
+) -> "pd.DataFrame":
+    """
+    Compute a failure table for curation based on the
+    provided metrics and thresholds.
+
+    Parameters
+    ----------
+    metrics : pd.DataFrame
+        DataFrame with metrics (index = unit_ids).
+    thresholds : dict
+        Threshold dictionary used for labeling.
+
+    Returns
+    -------
+    pd.DataFrame
+        Failure table with units that failed the thresholds.
+    """
+    import pandas as pd
+
+    absolute_value_metrics = ["amplitude_median"]
+    failure_data = {}
+
+    thresholds_flat = {}
+    for category, metric_dict in thresholds.items():
+        for metric_name, thresh in metric_dict.items():
+            thresholds_flat[metric_name] = thresh
+
+    for metric_name, thresh in thresholds_flat.items():
+        if metric_name not in metrics.columns:
+            continue
+        values = metrics[metric_name].values.copy()
+        if metric_name in absolute_value_metrics:
+            values = np.abs(values)
+
+        failed = np.isnan(values)
+        if not is_threshold_disabled(thresh.get("greater", None)):
+            failed |= values < thresh["greater"]
+        if not is_threshold_disabled(thresh.get("less", None)):
+            failed |= values > thresh["less"]
+        failure_data[metric_name] = failed
+
+    return pd.DataFrame(failure_data, index=metrics.index)
+
+
+def _get_metrics_for_unit_label(unit_label, thresholds):
+        if unit_label == "noise":
+            return thresholds["noise"]
+        elif unit_label == "mua":
+            return thresholds["mua"]
+        elif unit_label in ("non_soma", "non_soma_good", "non_soma_mua"):
+            return thresholds["non-somatic"]
+        return None

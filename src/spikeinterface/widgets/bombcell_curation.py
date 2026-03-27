@@ -7,6 +7,7 @@ import warnings
 import numpy as np
 
 from spikeinterface.curation.curation_tools import is_threshold_disabled
+from spikeinterface.curation import bombcell_get_failing_metrics
 
 from .base import BaseWidget, to_attr
 from .metrics import MetricsHistogramsWidget
@@ -80,15 +81,6 @@ class BombcellUpsetPlotWidget(BaseWidget):
         )
         BaseWidget.__init__(self, plot_data, backend=backend, **backend_kwargs)
 
-    def _get_metrics_for_unit_label(self, unit_label, thresholds):
-        if unit_label == "noise":
-            return thresholds["noise"]
-        elif unit_label == "mua":
-            return thresholds["mua"]
-        elif unit_label in ("non_soma", "non_soma_good", "non_soma_mua"):
-            return thresholds["non-somatic"]
-        return None
-
     def plot_matplotlib(self, data_plot, **backend_kwargs):
         import matplotlib.pyplot as plt
         import pandas as pd
@@ -123,7 +115,6 @@ class BombcellUpsetPlotWidget(BaseWidget):
             self.figures = [fig]
             return
 
-        failure_table = self._build_failure_table(metrics, thresholds)
         figures = []
         axes_list = []
 
@@ -133,24 +124,12 @@ class BombcellUpsetPlotWidget(BaseWidget):
             if n_units == 0:
                 continue
 
-            relevant_metrics = self._get_metrics_for_unit_label(unit_label, thresholds)
-            if relevant_metrics is not None:
-                available_metrics = [m for m in relevant_metrics if m in failure_table.columns]
-                if len(available_metrics) == 0:
-                    continue
-                unit_failure_table = failure_table[available_metrics]
-            else:
-                unit_failure_table = failure_table
-
-            unit_failures = unit_failure_table.loc[mask]
-            memberships = []
-            for idx in unit_failures.index:
-                failed = unit_failures.columns[unit_failures.loc[idx]].tolist()
-                if failed:
-                    memberships.append(failed)
-
-            if not memberships:
-                continue
+            failing_metrics = bombcell_get_failing_metrics(
+                external_metrics=metrics.loc[mask],
+                unit_labels=unit_labels[mask],
+                thresholds=thresholds
+            )
+            memberships = [list(unit_failures) for unit_failures in failing_metrics.values()]
 
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", category=FutureWarning, module="upsetplot")
@@ -181,33 +160,6 @@ class BombcellUpsetPlotWidget(BaseWidget):
         self.figures = figures
         self.figure = figures[0] if figures else None
         self.axes = axes_list
-
-    def _build_failure_table(self, metrics, thresholds):
-        import pandas as pd
-
-        absolute_value_metrics = ["amplitude_median"]
-        failure_data = {}
-
-        thresholds_flat = {}
-        for category, metric_dict in thresholds.items():
-            for metric_name, thresh in metric_dict.items():
-                thresholds_flat[metric_name] = thresh
-
-        for metric_name, thresh in thresholds_flat.items():
-            if metric_name not in metrics.columns:
-                continue
-            values = metrics[metric_name].values.copy()
-            if metric_name in absolute_value_metrics:
-                values = np.abs(values)
-
-            failed = np.isnan(values)
-            if not is_threshold_disabled(thresh.get("greater", None)):
-                failed |= values < thresh["greater"]
-            if not is_threshold_disabled(thresh.get("less", None)):
-                failed |= values > thresh["less"]
-            failure_data[metric_name] = failed
-
-        return pd.DataFrame(failure_data, index=metrics.index)
 
 
 def plot_bombcell_unit_labeling_all(

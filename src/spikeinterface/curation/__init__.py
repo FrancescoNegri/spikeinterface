@@ -29,4 +29,5 @@ from .bombcell_curation import (
     bombcell_get_default_thresholds,
     bombcell_label_units,
     save_bombcell_results,
+    bombcell_get_failing_metrics
 )
